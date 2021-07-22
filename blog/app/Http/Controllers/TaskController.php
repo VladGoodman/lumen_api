@@ -40,9 +40,16 @@ class TaskController extends Controller
                     "message" => 'Error getting!'
                 ], 422);
             }
-            $task = Task::with($request->input('withs'))
+            if($request->input('withs') == false) {
+                $task = Task::where('executor_user_id', Auth::id())
+                    ->where('id', $id)->first();
+            }else{
+                $task = Task::with($request->input('withs'))
                 ->where('executor_user_id', Auth::id())
                 ->where('id', $id)->first();
+
+            }
+
             if ($task == false) {
                 return response()->json([
                     "data" => null,
@@ -55,7 +62,7 @@ class TaskController extends Controller
                     "attributes" => $task
                 ],
                 "message" => 'Received!'
-            ], 201);
+            ], 200);
 
         } catch (\Exception $errors) {
             return response()->json([
@@ -121,11 +128,11 @@ class TaskController extends Controller
     {
         try {
             $validate = Validator::make($request->all(), [
-                'attributes.name' => 'required|string|min:3',
-                'attributes.list_id' => 'required|integer|min:1',
+                'attributes.name' => 'required|string',
+                'attributes.list_id' => 'required|integer',
                 'attributes.is_completed' => 'required|boolean',
-                'attributes.description' => 'string|min:3',
-                'attributes.urgency' => 'required|integer|min:1',
+                'attributes.description' => 'string',
+                'attributes.urgency' => 'required|integer',
             ]);
             if ($validate->fails()) {
                 return response()->json([
@@ -137,10 +144,15 @@ class TaskController extends Controller
             $new_task = new Task();
             $new_task->executor_user_id = Auth::id();
             $new_task->name = $request->post('attributes')['name'];
-            $list = Auth::user()->lists
-                ->where('id', $request->post('attributes')['list_id'])
-                ->first();
-            if ($list == false) {
+            $list = UserLists::all()
+                ->where('list_id', $request->post('attributes')['list_id'])
+                ->where('user_id', Auth::id())->first();
+            if ($list) {
+                $new_task->list_id = $request->post('attributes')['list_id'];
+                $new_task->is_completed = $request->post('attributes')['is_completed'];
+                $new_task->urgency = $request->post('attributes')['urgency'];
+                $new_task->description = isset($request->post('attributes')['description']) ? $request->post('attributes')['description'] : null;
+            }else{
                 return response()->json([
                     "data" => [
                         "error" => 'No list with this ID found'
@@ -149,10 +161,6 @@ class TaskController extends Controller
                 ], 422);
             }
 
-            $new_task->list_id = $request->post('attributes')['list_id'];
-            $new_task->is_completed = $request->post('attributes')['is_completed'];
-            $new_task->urgency = $request->post('attributes')['urgency'];
-            $new_task->description = isset($request->post('attributes')['description']) ? $request->post('attributes')['description'] : null;
             if ($new_task->save() == false) {
                 return response()->json([
                     "data" => null,

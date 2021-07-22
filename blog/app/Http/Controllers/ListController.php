@@ -26,14 +26,25 @@ class ListController extends Controller
                     "message" => 'Error getting!'
                 ], 422);
             }
-            $user_lists = Lists::with($request->input('withs'))
-                ->with('user')
-                ->whereHas('user', function ($q) {
-                    $q->where('user_id', Auth::user()->id);
-                })
-                ->where($request->input('filter'))
-                ->where('id', $id)
-                ->get()->first();
+            if($request->input('withs') == false) {
+                $user_lists = Lists::with('user')
+                    ->whereHas('user', function ($q) {
+                        $q->where('user_id', Auth::user()->id);
+                    })
+                    ->where($request->input('filter'))
+                    ->where('id', $id)
+                    ->get()->first();
+            }else{
+                $user_lists = Lists::with($request->input('withs'))
+                    ->with('user')
+                    ->whereHas('user', function ($q) {
+                        $q->where('user_id', Auth::user()->id);
+                    })
+                    ->where($request->input('filter'))
+                    ->where('id', $id)
+                    ->get()->first();
+            }
+
 
             if ($user_lists == false) {
                 return response()->json([
@@ -47,7 +58,7 @@ class ListController extends Controller
                     "attributes" => $user_lists
                 ],
                 "message" => 'Received!'
-            ], 201);
+            ], 200);
 
         } catch (\Exception $errors) {
             return response()->json([
@@ -79,21 +90,33 @@ class ListController extends Controller
             $page = $request->input('page') - 1;
             $per_page = $request->input('per_page');
             $filter = $request->input('filter');
-            $user_lists = Lists::with($request->input('withs'))
-                ->with('user')
-                ->whereHas('user', function ($q) {
-                    $q->where('user_id', Auth::user()->id);
-                })
-                ->where($request->input('filter'))
-                ->skip($page * $per_page)
-                ->take($per_page)
-                ->get();
+            if($request->input('withs') == false){
+                $user_lists = Lists::with('user')
+                    ->whereHas('user', function ($q) {
+                        $q->where('user_id', Auth::user()->id);
+                    })
+                    ->where($request->input('filter'))
+                    ->skip($page * $per_page)
+                    ->take($per_page)
+                    ->get();
+            }else{
+                $user_lists = Lists::with($request->input('withs'))
+                    ->with('user')
+                    ->whereHas('user', function ($q) {
+                        $q->where('user_id', Auth::user()->id);
+                    })
+                    ->where($request->input('filter'))
+                    ->skip($page * $per_page)
+                    ->take($per_page)
+                    ->get();
+            }
+
             return response()->json([
                 "data" => [
                     "items" => $user_lists->sortBy($request->input("order"))
                 ],
                 "message" => 'Received!'
-            ], 201);
+            ], 200);
 
         } catch (\Exception $errors) {
             return response()->json([

@@ -86,7 +86,7 @@ class ListsTest extends TestCase
         $this->createTask($list['data']['attributes']['id']);
         $this->createTask($list['data']['attributes']['id']);
         $list = $this->createList('list3');
-        $this->createTask($list['data']['attributes']['id']);
+        $task = $this->createTask($list['data']['attributes']['id']);
 
         $this->assertResponseStatus(201);
 
