@@ -1,0 +1,33 @@
+version: '3.7'
+
+services:
+
+  database:
+    image: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=task
+    ports:
+      - 5433:5432
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - ./.pgadmin:/root/.pgadmin
+    ports:
+      - ${PGADMIN_PORT:-5050}:80
+    restart: unless-stopped
+
+  lumen:
+    build: .
+    command: php -S lumen:8000 -t public
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      - database
