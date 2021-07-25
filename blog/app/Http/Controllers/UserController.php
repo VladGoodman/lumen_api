@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Helper\ResponseHelper;
 use App\Models\Task;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -9,9 +10,16 @@ use Illuminate\Support\Str;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Namshi\JOSE\JWT;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Facades\JWTFactory;
 
 class UserController extends Controller
 {
+    public function __construct()
+    {
+        $this->middleware('auth:api', ['except' => ['register', 'login']]);
+    }
 
     public function register(Request $request)
     {
@@ -20,30 +28,27 @@ class UserController extends Controller
             'email' => 'required|string|email|unique:users,email|min:1|max:40',
             'password' => 'required|string|min:1|max:30',
         ]);
-        if($validate->fails()){
-            return response()->json([
-                    "data"=>$validate->errors(),
-                    "message"=> 'Error registration!'
-            ], 422);
-        }else{
-            $user = new User;
-            $user->name = $request->post('name');
-            $user->email = $request->post('email');
-            $user->password = Hash::make($request->post('password'));
-            $user->api_token = Str::random(30);
-            $user->refresh_token = Str::random(50);
-
-            if($user->save()){
+        if ($validate->fails()) {
+            return ResponseHelper::form("Error register!", 422, $validate->errors());
+        }
+        try {
+            $new_user = User::create([
+                'name' => $request->post('name'),
+                'password' => Hash::make($request->post('password')),
+                'email' => $request->post('email'),
+                'api_token' => Str::random(20),
+                'refresh_token' => Str::random(30)
+            ]);
+            if ($new_user) {
                 return response()->json([
-                    "data"=>null,
-                    "message"=> 'Registered!'
+                    "data" => null,
+                    "message" => 'Registered!'
                 ], 201);
-            }else{
-                return response()->json([
-                    "data"=>null,
-                    "message"=> 'Error registration!'
-                ], 400);
+            } else {
+                return ResponseHelper::form("Error registration!", 400);
             }
+        } catch (\Exception $e) {
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 
@@ -54,95 +59,75 @@ class UserController extends Controller
             'password' => 'required|string|min:1|max:30',
         ]);
 
-        if($validate->fails()){
+        if ($validate->fails()) {
             return response()->json($validate->errors(), 401);
-        }else{
-           $user = User::where(
-               'email','=',$request->input('email'))
-                ->first();
-            if(!$user || Hash::check($user->password, $request->input('password'))){
-                return response()->json([
-                    "data"=> null,
-                    "message"=> 'Error logged!'
-                ], 401);
-            }else{
-                return response()->json([
-                    "data"=>[
-                        'access_token'=>$user->api_token,
-                        'refresh_token'=>$user->refresh_token,
-                    ],
-                    "message"=> 'Logged!'
-                ], 200);
-
-            }
         }
+        try {
+            $credentials = request(['email', 'password']);
+
+            if (!$token = auth()->attempt($credentials)) {
+                return ResponseHelper::form(['error' => 'Unauthorized'], 401);
+            }
+            $payload = JWTFactory::sub(Auth::id())
+                ->exp(time() + (1))
+                ->refreshesToken($token)->make();
+
+            $refresh_token = JWTAuth::encode($payload);
+            return ResponseHelper::form('Logged!',
+                200,
+                [
+                    "access_token" => $token,
+                    "refresh_token" => $refresh_token->get()
+                ]);
+
+        } catch (\Exception $e) {
+            return ResponseHelper::form("SQL request error!", 401);
+        }
+
     }
 
-    public function refreshAccessToken(Request $request){
-        $validate = Validator::make($request->all(), [
-            'refresh_token' => 'required|string|min:1'
-        ]);
-        if($validate->fails()){
-            return response()->json([
-                "data"=>$validate->errors(),
-                "message"=> 'Error refreshed!'
-            ], 401);
-        }else{
-            $auth_user = Auth::user();
-            if($auth_user->refresh_token === $request->input('refresh_token')){
-                $auth_user->api_token = Str::random(30);
-                $auth_user->save();
-                return response()->json([
-                    "data"=>[
-                        'access_token'=> $auth_user->api_token,
-                    ],
-                    "message"=> 'Refreshed!'
-                ], 201);
-            }else{
-                return response()->json([
-                    "data"=> [
-                        'refresh_token' => 'Invalid refresh token!'
-                    ],
-                    "message"=> 'Error Refreshed!'
-                ], 401);
-            }
+    public function refreshAccessToken(Request $request)
+    {
+        $token = JWTAuth::getToken();
+        $user = JWTAuth::toUser(JWTAuth::decode($token)['refreshesToken']);
+        if (Auth::user() === $user) {
+            return ResponseHelper::form('Success!',
+                200,
+                [
+                    "access_token" => \auth()->refresh(),
+                ]);
+        } else {
+            return ResponseHelper::form('Error auth!',
+                422,
+                [
+                    "access_token" => \auth()->refresh(),
+                ]);
         }
     }
 
     public function getItem(Request $request, $id)
     {
+        $validate = Validator::make($request->all(), [
+            'with' => 'array',
+            'with.*' => 'string'
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form("Error logged!", 422, $validate->errors());
+        }
         try {
-            $validate = Validator::make($request->all(), [
-                'with' => 'array',
-                'with.*' => 'string'
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error getting!'
-                ], 401);
-            }
             $task = User::with($request->input('withs'))
                 ->where('id', $id)->first();
-            if ($task == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'User not found!'
-                ], 404);
+            if (!$task) {
+                return ResponseHelper::form("User not found!", 404);
             }
-
-            return response()->json([
-                "data" => [
+            return ResponseHelper::form(
+                "Received!",
+                201,
+                [
                     "attributes" => $task
-                ],
-                "message" => 'Received!'
-            ], 201);
-
+                ]);
         } catch (\Exception $errors) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 
@@ -159,40 +144,42 @@ class UserController extends Controller
                 'page' => 'integer|min:1',
             ]);
             if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error get users!'
-                ], 401);
+                return ResponseHelper::form("Error logged!", 422, $validate->errors());
             }
 
             $page = $request->input('page') - 1;
             $per_page = $request->input('per_page');
-            if ($request->input('withs') !== null){
+            if ($request->input('withs') !== null) {
                 $tasks = User::with($request->input('withs'))
                     ->where($request->input('filter'))
                     ->skip($page * $per_page)
                     ->take($per_page)
                     ->get();
-            }else{
+            } else {
                 $tasks = User::where($request->input('filter'))
                     ->skip($page * $per_page)
                     ->take($per_page)
                     ->get();
             }
+            return ResponseHelper::form(
+                "Received!",
+                201,
+                ["items" => $tasks->sortBy($request->input("order"))]);
 
-
-            return response()->json([
-                "data" => [
-                    "items" => $tasks->sortBy($request->input("order"))
-                ],
-                "message" => 'Received!'
-            ], 201);
 
         } catch (\Exception $errors) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            return ResponseHelper::form("SQL request error!", 401);
         }
+    }
+
+
+    protected function respondWithToken($token)
+    {
+        return ResponseHelper::form("Get token!", 200,
+            [
+                'access_token' => $token,
+                'token_type' => 'bearer',
+                'expires_in' => auth()->factory()->getTTL() * 60
+            ]);
     }
 }

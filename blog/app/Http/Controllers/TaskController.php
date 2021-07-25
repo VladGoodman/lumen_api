@@ -2,99 +2,72 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Lists;
+use App\Http\Helper\ResponseHelper;
 use App\Models\Task;
-use App\Models\User;
 use App\Models\UserLists;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
-use Mockery\Matcher\Closure;
-use function PHPUnit\Framework\isType;
+
 
 class TaskController extends Controller
 {
 
     public function getItem(Request $request, $id)
     {
+        if (!(int)$id || empty($id)) {
+            return ResponseHelper::form("Page not found!", 404);
+        }
+        $validate = Validator::make($request->all(), [
+            'with' => 'array',
+            'with.*' => 'string'
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form(
+                "Error getting!",
+                422,
+                $validate->errors());
+        }
         try {
-            if( (int) $id === 0){
-                return response()->json([
-                    "message" => 'Page not found!'
-                ], 404);
-            }
-            if ($id === null){
-                return response()->json([
-                    "message" => 'Error!'
-                ], 404);
-            }
-            $validate = Validator::make($request->all(), [
-                'with' => 'array',
-                'with.*' => 'string'
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error getting!'
-                ], 422);
-            }
-            if($request->input('withs') == false) {
+            if (!$request->input('withs')) {
                 $task = Task::where('executor_user_id', Auth::id())
                     ->where('id', $id)->first();
-            }else{
+            } else {
                 $task = Task::with($request->input('withs'))
-                ->where('executor_user_id', Auth::id())
-                ->where('id', $id)->first();
-
+                    ->where('executor_user_id', Auth::id())
+                    ->where('id', $id)->first();
             }
-
-            if ($task == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'Task not found!'
-                ], 422);
+            if (!$task) {
+                return ResponseHelper::form("Task not found!", 422, $validate->errors());
             }
-
-            return response()->json([
-                "data" => [
-                    "attributes" => $task
-                ],
-                "message" => 'Received!'
-            ], 200);
-
+            return ResponseHelper::form("Received", 200, ["attributes" => $task]);
         } catch (\Exception $errors) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 
     public function getItems(Request $request)
     {
+        $validate = Validator::make($request->all(), [
+            'filter' => 'array',
+            'filter.*' => 'array',
+            'order' => 'array',
+            'with' => 'array',
+            'with.*' => 'string|min:1',
+            'per_page' => 'integer|min:1',
+            'page' => 'integer|min:1',
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form(
+                "Error getting!",
+                422,
+                $validate->errors());
+        }
+        $page = $request->input('page') - 1;
+        $per_page = $request->input('per_page');
         try {
-            $validate = Validator::make($request->all(), [
-                'filter' => 'array',
-                'filter.*' => 'array',
-                'order' => 'array',
-                'with' => 'array',
-                'with.*' => 'string|min:1',
-                'per_page' => 'integer|min:1',
-                'page' => 'integer|min:1',
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error get items!'
-                ], 401);
-            }
-            $page = $request->input('page') - 1;
-            $per_page = $request->input('per_page');
 
-
-            if ($request->input('withs') !== null) {
+            if (!empty($request->input('withs'))) {
                 $tasks = Task::with($request->input('withs'))
                     ->where($request->input('filter'))
                     ->where('executor_user_id', Auth::id())
@@ -108,131 +81,98 @@ class TaskController extends Controller
                     ->take($per_page)
                     ->get();
             }
-
-            return response()->json([
-                "data" => [
-                    "items" => $tasks->sortBy($request->input("order"))
-                ],
-                "message" => 'Received!'
-            ], 200);
+            return ResponseHelper::form(
+                "Received!",
+                200,
+                ["items" => $tasks->sortBy($request->input("order"))]);
 
         } catch (\Exception $errors) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 
     public function create(Request $request)
     {
-        try {
-            $validate = Validator::make($request->all(), [
-                'attributes.name' => 'required|string',
-                'attributes.list_id' => 'required|integer',
-                'attributes.is_completed' => 'required|boolean',
-                'attributes.description' => 'string',
-                'attributes.urgency' => 'required|integer',
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error created!'
-                ], 422);
-            }
+        $validate = Validator::make($request->all(), [
+            'attributes.name' => 'required|string',
+            'attributes.list_id' => 'required|integer',
+            'attributes.is_completed' => 'required|boolean',
+            'attributes.description' => 'string',
+            'attributes.urgency' => 'required|integer',
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form("Error getting!", 422, $validate->errors());
+        }
 
-            $new_task = new Task();
-            $new_task->executor_user_id = Auth::id();
-            $new_task->name = $request->post('attributes')['name'];
+        try {
             $list = UserLists::all()
                 ->where('list_id', $request->post('attributes')['list_id'])
                 ->where('user_id', Auth::id())->first();
-            if ($list) {
-                $new_task->list_id = $request->post('attributes')['list_id'];
-                $new_task->is_completed = $request->post('attributes')['is_completed'];
-                $new_task->urgency = $request->post('attributes')['urgency'];
-                $new_task->description = isset($request->post('attributes')['description']) ? $request->post('attributes')['description'] : null;
-            }else{
-                return response()->json([
-                    "data" => [
-                        "error" => 'No list with this ID found'
-                    ],
-                    "message" => 'Error created!'
-                ], 422);
+            if (!$list) {
+                return ResponseHelper::form(
+                    "Error created!",
+                    422,
+                    ["error" => 'No list with this ID found']);
+
+            } else {
+                $new_task = Task::create([
+                    'executor_user_id' => Auth::id(),
+                    'name' => $request->post('attributes')['name'],
+                    'list_id' => $request->post('attributes')['list_id'],
+                    'is_completed' => $request->post('attributes')['is_completed'],
+                    'urgency' => $request->post('attributes')['urgency'],
+                    'description' => isset($request->post('attributes')['description']) ? $request->post('attributes')['description'] : null
+                ]);
             }
 
-            if ($new_task->save() == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'SQL request error!'
-                ], 422);
+            if (!$new_task) {
+                return ResponseHelper::form(
+                    "Error created task",
+                    422);
             }
-
-            return response()->json([
-                "data" => [
-                    "attributes" => $new_task
-                ],
-                "message" => 'Created!'
-            ], 201);
-
+            return ResponseHelper::form(
+                "Created!",
+                201,
+                ["attributes" => $new_task]);
         } catch (\Exception $e) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 
     public function update(Request $request, $id)
     {
+        $validate = Validator::make($request->all(), [
+            'attributes.name' => 'string|min:3',
+            'attributes.list_id' => 'integer|min:1',
+            'attributes.is_completed' => 'boolean',
+            'attributes.description' => 'string|min:3',
+            'attributes.urgency' => 'integer|min:1',
+            'id' => 'integer|min1'
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form("Error getting!", 422, $validate->errors());
+        }
         try {
-            $validate = Validator::make($request->all(), [
-                'attributes.name' => 'string|min:3',
-                'attributes.list_id' => 'integer|min:1',
-                'attributes.is_completed' => 'boolean',
-                'attributes.description' => 'string|min:3',
-                'attributes.urgency' => 'integer|min:1',
-                'id' => 'integer|min1'
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error created!'
-                ], 401);
-            }
-
             $updated_task = Auth::user()->tasks->where('id', $id)->first();
 
-            if ($updated_task == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'No task found!'
-                ], 401);
+            if (!$updated_task) {
+                return ResponseHelper::form("No task found!", 401);
             }
 
-            if (Auth::user()->lists
-                    ->where('id', $request->post('attributes')['list_id'])
-                    ->first() == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'No list found!'
-                ], 401);
+            if (!Auth::user()->lists
+                ->where('id', $request->post('attributes')['list_id'])
+                ->first()) {
+                return ResponseHelper::form("No list found!", 401);
             }
 
             $updated_task->update($request->input('attributes'));
 
-            return response()->json([
-                "data" => [
-                    "attributes" => $updated_task
-                ],
-                "message" => 'Updated!'
-            ], 200);
-
+            return ResponseHelper::form(
+                "Updated!",
+                200,
+                ["attributes" => $updated_task]);
         } catch (\Exception $e) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 
@@ -241,27 +181,15 @@ class TaskController extends Controller
         try {
             $deleted_task = Auth::user()->tasks->where('id', $id)->first();
 
-            if ($deleted_task == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'No task found!'
-                ], 422);
+            if (!$deleted_task) {
+                return ResponseHelper::form("No task found!", 422);
             }
-            if ($deleted_task->delete()) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'Deleted!'
-                ], 200);
+            if (!$deleted_task->delete()) {
+                return ResponseHelper::form("Error deleted!", 422);
             }
-            return response()->json([
-                "data" => null,
-                "message" => 'Error deleted!'
-            ], 422);
+            return ResponseHelper::form("Deleted!", 200);
         } catch (\Exception $e) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 422);
+            return ResponseHelper::form("SQL request error!", 401);
         }
     }
 }

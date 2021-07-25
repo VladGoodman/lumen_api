@@ -6,7 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class Lists extends Model
 {
-
+    protected $fillable = [
+        'name', 'count_tasks', 'is_completed', 'is_closed'
+    ];
     protected $hidden = [
         'pivot', 'user'
     ];

@@ -2,31 +2,30 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\CreatingListsEvent;
+use App\Http\Helper\ResponseHelper;
 use App\Models\Lists;
-use App\Models\User;
 use App\Models\UserLists;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class ListController extends Controller
 {
     public function getItem(Request $request, $id)
     {
+        $validate = Validator::make($request->all(), [
+            'with' => 'array',
+            'with.*' => 'string'
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form(
+                "Error getting!",
+                422,
+                $validate->errors());
+        }
         try {
-            $validate = Validator::make($request->all(), [
-                'with' => 'array',
-                'with.*' => 'string'
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error getting!'
-                ], 422);
-            }
-            if($request->input('withs') == false) {
+            if (empty($request->input('withs'))) {
                 $user_lists = Lists::with('user')
                     ->whereHas('user', function ($q) {
                         $q->where('user_id', Auth::user()->id);
@@ -34,7 +33,7 @@ class ListController extends Controller
                     ->where($request->input('filter'))
                     ->where('id', $id)
                     ->get()->first();
-            }else{
+            } else {
                 $user_lists = Lists::with($request->input('withs'))
                     ->with('user')
                     ->whereHas('user', function ($q) {
@@ -45,52 +44,45 @@ class ListController extends Controller
                     ->get()->first();
             }
 
-
-            if ($user_lists == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'List not found!'
-                ], 422);
+            if (!$user_lists) {
+                return ResponseHelper::form(
+                    "List not found!",
+                    422);
             }
-
-            return response()->json([
-                "data" => [
-                    "attributes" => $user_lists
-                ],
-                "message" => 'Received!'
-            ], 200);
+            return ResponseHelper::form(
+                "Received!",
+                200,
+                ["attributes" => $user_lists]);
 
         } catch (\Exception $errors) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 422);
+            return ResponseHelper::form(
+                "SQL request error!",
+                422);
         }
     }
 
     public function getItems(Request $request)
     {
-        try {
-            $validate = Validator::make($request->all(), [
-                'filter' => 'array',
-                'filter.*' => 'array',
-                'order' => 'array',
-                'with' => 'array',
-                'with.*' => 'string|min:1',
-                'per_page' => 'integer|min:1',
-                'page' => 'integer|min:1',
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error get items!'
-                ], 422);
-            }
+        $validate = Validator::make($request->all(), [
+            'filter' => 'array',
+            'filter.*' => 'array',
+            'order' => 'array',
+            'with' => 'array',
+            'with.*' => 'string|min:1',
+            'per_page' => 'integer|min:1',
+            'page' => 'integer|min:1',
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form(
+                "Error getting!",
+                422,
+                $validate->errors());
+        }
 
-            $page = $request->input('page') - 1;
-            $per_page = $request->input('per_page');
-            $filter = $request->input('filter');
-            if($request->input('withs') == false){
+        $page = $request->input('page') - 1;
+        $per_page = $request->input('per_page');
+        try {
+            if (empty($request->input('withs'))) {
                 $user_lists = Lists::with('user')
                     ->whereHas('user', function ($q) {
                         $q->where('user_id', Auth::user()->id);
@@ -99,7 +91,7 @@ class ListController extends Controller
                     ->skip($page * $per_page)
                     ->take($per_page)
                     ->get();
-            }else{
+            } else {
                 $user_lists = Lists::with($request->input('withs'))
                     ->with('user')
                     ->whereHas('user', function ($q) {
@@ -110,107 +102,98 @@ class ListController extends Controller
                     ->take($per_page)
                     ->get();
             }
-
-            return response()->json([
-                "data" => [
-                    "items" => $user_lists->sortBy($request->input("order"))
-                ],
-                "message" => 'Received!'
-            ], 200);
+            return ResponseHelper::form(
+                "Received!",
+                200,
+                ["items" => $user_lists->sortBy($request->input("order"))]);
 
         } catch (\Exception $errors) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 422);
+            return ResponseHelper::form(
+                "SQL request error!",
+                422);
         }
     }
 
     public function create(Request $request)
     {
+        $validate = Validator::make($request->all(), [
+            'attributes.name' => 'required|string',
+            'attributes.count_tasks' => 'required|integer',
+            'attributes.is_completed' => 'required|boolean',
+            'attributes.is_closed' => 'required|boolean'
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form(
+                "Error getting!",
+                422,
+                $validate->errors());
+        }
+        $request_data_list = $request->input('attributes');
         try {
-            $validate = Validator::make($request->all(), [
-                'attributes.name' => 'required|string',
-                'attributes.count_tasks' => 'required|integer',
-                'attributes.is_completed' => 'required|boolean',
-                'attributes.is_closed' => 'required|boolean'
+            $new_list = Lists::create([
+                'name' => $request_data_list['name'],
+                "count_tasks" => 0,
+                'is_completed' => $request_data_list['is_completed'],
+                'is_closed' => $request_data_list['is_closed'],
             ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error created!'
-                ], 422);
+            if (!$new_list) {
+                return ResponseHelper::form(
+                    "Error created!",
+                    422);
             }
-            $list = new Lists;
-            $list->name = $request->post('attributes')['name'];
-            $list->is_completed = true;
-            $list->is_closed = false;
-            if ($list->save()) {
-                $user_list = new UserLists();
-                $user_list->list_id = $list->id;
-                $user_list->user_id = Auth::user()->id;
-                if ($user_list->save()) {
-                    return response()->json([
-                        "data" => [
-                            "attributes" => Lists::all()->where('id', $list->id)->first()
-                        ],
-                        "message" => 'Created!'
-                    ], 201);
-                }
-            }
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 401);
+            event(new CreatingListsEvent($new_list));
+            return ResponseHelper::form(
+                "Created!",
+                201,
+                ["attributes" => $new_list]);
         } catch (\Exception $e) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 422);
+            return ResponseHelper::form(
+                "SQL request error!",
+                422);
         }
     }
 
     public function update(Request $request, $id)
     {
+        $validate = Validator::make($request->all(), [
+            'attributes.name' => 'string|min:3',
+            'attributes.count_tasks' => 'integer|min:1',
+            'attributes.is_completed' => 'boolean',
+            'attributes.is_closed' => 'boolean'
+        ]);
+        if ($validate->fails()) {
+            return ResponseHelper::form(
+                "Error getting!",
+                422,
+                $validate->errors());
+        }
+        $request_data_list = $request->input('attributes');
+
         try {
-            $validate = Validator::make($request->all(), [
-                'attributes.name' => 'string|min:3',
-                'attributes.count_tasks' => 'integer|min:1',
-                'attributes.is_completed' => 'boolean',
-                'attributes.is_closed' => 'boolean'
-            ]);
-            if ($validate->fails()) {
-                return response()->json([
-                    "data" => $validate->errors(),
-                    "message" => 'Error created!'
-                ], 422);
-            }
 
             $updated_user_lists = UserLists::all()
                 ->where('user_id', '=', Auth::user()->id)
                 ->where('list_id', '=', $id);
 
-            if ($updated_user_lists == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'No listing found!'
-                ], 422);
+            if (!$updated_user_lists) {
+                return ResponseHelper::form(
+                    "No listing found!",
+                    422,
+                    $validate->errors());
             }
             $updated_list = $updated_user_lists->first()->list;
 
-            $updated_list->update($request->input('attributes'));
+            $updated_list->update($request_data_list);
 
-            return response()->json([
-                "data" => [
-                    "attributes" => $updated_list
-                ],
-                "message" => 'Updated!'
-            ], 201);
+            return ResponseHelper::form(
+                "Updated!",
+                201,
+                ["attributes" => $updated_list]);
+
         } catch (\Exception $e) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 422);
+            return ResponseHelper::form(
+                "SQL request error!",
+                422);
         }
     }
 
@@ -221,28 +204,17 @@ class ListController extends Controller
                 ->where('user_id', '=', Auth::user()->id)
                 ->where('list_id', '=', $id)->first();
 
-            if ($deleted_user_lists == false) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'No listing found!'
-                ], 401);
+            if (!$deleted_user_lists) {
+                return ResponseHelper::form("No listing found!", 401);
             }
-            if ($deleted_user_lists->list->delete()) {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'Deleted!'
-                ], 200);
-            } else {
-                return response()->json([
-                    "data" => null,
-                    "message" => 'Error deleted!'
-                ], 422);
+            if (!$deleted_user_lists->list->delete()) {
+                return ResponseHelper::form("Error deleted!", 422);
             }
+            return ResponseHelper::form("Deleted!", 200);
         } catch (\Exception $e) {
-            return response()->json([
-                "data" => null,
-                "message" => 'SQL request error!'
-            ], 422);
+            return ResponseHelper::form(
+                "SQL request error!",
+                422);
         }
     }
 }
